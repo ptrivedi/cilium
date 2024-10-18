@@ -674,7 +674,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 			return err
 		}
 		e.realizedPolicy.SetPolicyMap(pm)
-		e.updatePolicyMapPressureMetric()
+		e.updatePolicyMapPressureMetric(0)
 	}
 
 	if e.isProperty(PropertySkipBPFRegeneration) {
@@ -873,8 +873,8 @@ type policyMapPressureUpdater interface {
 	Remove(uint16)
 }
 
-func (e *Endpoint) updatePolicyMapPressureMetric() {
-	value := float64(e.desiredPolicy.GetPolicyMap().Len()) / float64(e.policyMap.MaxEntries())
+func (e *Endpoint) updatePolicyMapPressureMetric(add float64) {
+	value := (float64(e.desiredPolicy.GetPolicyMap().Len()) + add) / float64(e.policyMap.MaxEntries())
 	e.PolicyMapPressureUpdater.Update(PolicyMapPressureEvent{
 		Value:      value,
 		EndpointID: e.ID,
@@ -915,7 +915,7 @@ func (e *Endpoint) deletePolicyKey(keyToDelete policy.Key, incremental bool) boo
 	// Operation was successful, remove from realized state.
 	if ok {
 		e.realizedPolicy.DeleteMapState(keyToDelete)
-		e.updatePolicyMapPressureMetric()
+		e.updatePolicyMapPressureMetric(0)
 
 		e.PolicyDebug(logrus.Fields{
 			logfields.BPFMapKey:   keyToDelete,
@@ -966,7 +966,7 @@ func (e *Endpoint) addPolicyKey(keyToAdd policy.Key, entry policy.MapStateEntry,
 
 	// Operation was successful, add to realized state.
 	e.realizedPolicy.InsertMapState(keyToAdd, entry)
-	e.updatePolicyMapPressureMetric()
+	e.updatePolicyMapPressureMetric(0)
 
 	e.PolicyDebug(logrus.Fields{
 		logfields.BPFMapKey:   keyToAdd,
@@ -1053,6 +1053,7 @@ func (e *Endpoint) applyPolicyMapChangesLocked(regenContext *regenerationContext
 			}
 			e.lockdown = true
 		}
+		e.updatePolicyMapPressureMetric(float64(e.desiredPolicy.GetPolicyMap().Len() + len(changes.Adds) - deleteLen))
 		return ErrPolicyEntryMaxExceeded
 	}
 
@@ -1203,7 +1204,6 @@ func (e *Endpoint) endpointPolicyLockdown() error {
 	if err = e.policyMap.Pin(e.policyMapPath()); err != nil {
 		return fmt.Errorf("failed to pin new map to %q: %w", e.policyMapPath(), err)
 	}
-	e.updatePolicyMapPressureMetric()
 	return nil
 }
 
